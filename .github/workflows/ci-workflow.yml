@@ -44,7 +44,14 @@ jobs:
           mlruns/
           MLProject/model/
         retention-days: 30
-
+        
+    - name: Save run ID to file
+      run: |
+        # Get the latest run ID and save to file
+        RUN_ID=$(ls -t mlruns/0 | head -1)
+        echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
+        echo "Latest Run ID: $RUN_ID"
+        
   build-docker:
     needs: train-model
     runs-on: ubuntu-latest
@@ -54,6 +61,12 @@ jobs:
     - name: Checkout code
       uses: actions/checkout@v4
       
+    - name: Download MLflow artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: mlflow-artifacts
+        path: ./
+        
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
@@ -64,32 +77,29 @@ jobs:
         python -m pip install --upgrade pip
         pip install mlflow scikit-learn pandas numpy
         
-    - name: Download MLflow artifacts from previous job
-      uses: actions/download-artifact@v4
-      with:
-        name: mlflow-artifacts
-        path: ./
-        
-    - name: Find latest run and build Docker
-      id: build
+    - name: Find latest run and verify
+      id: find-run
       run: |
-        # Cari run ID yang paling baru
-        RUN_ID=$(ls -t mlruns/0 | head -1)
-        echo "RUN_ID=$RUN_ID"
+        # List available runs
+        echo "Available runs:"
+        ls -la mlruns/0/
         
-        if [ -d "mlruns/0/$RUN_ID/artifacts/model" ]; then
-          echo "Model found for run: $RUN_ID"
-          
-          mlflow models build-docker \
-            -m "mlruns/0/$RUN_ID/artifacts/model" \
-            -n "fraud-detection-model" \
-            --enable-mlserver
-            
-        else
-          echo "ERROR: Model not found for run: $RUN_ID"
-          ls -la mlruns/0/$RUN_ID/artifacts/
-          exit 1
-        fi
+        # Get the latest run ID
+        RUN_ID=$(ls -t mlruns/0 | head -1)
+        echo "Using Run ID: $RUN_ID"
+        echo "RUN_ID=$RUN_ID" >> $GITHUB_OUTPUT
+        
+        # Verify model exists
+        echo "Model artifacts:"
+        ls -la "mlruns/0/$RUN_ID/artifacts/model/"
+        
+    - name: Build Docker image with MLflow
+      run: |
+        echo "Building Docker image for run: ${{ steps.find-run.outputs.RUN_ID }}"
+        mlflow models build-docker \
+          -m "mlruns/0/${{ steps.find-run.outputs.RUN_ID }}/artifacts/model" \
+          -n "fraud-detection-model" \
+          --enable-mlserver
         
     - name: Log in to Docker Hub
       uses: docker/login-action@v3
@@ -101,8 +111,3 @@ jobs:
       run: |
         docker tag fraud-detection-model ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:latest
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:latest
-        
-    - name: Tag and push version
-      run: |
-        docker tag fraud-detection-model ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:${{ github.sha }}
-        docker push ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:${{ github.sha }}
