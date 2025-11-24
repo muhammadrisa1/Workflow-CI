@@ -23,12 +23,11 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install mlflow scikit-learn pandas numpy boto3
+        pip install mlflow scikit-learn pandas numpy boto3 requests
         
     - name: Run MLflow project
       run: |
         cd MLProject
-        # FIXED URLs - train untuk training, test untuk testing
         mlflow run . \
           --experiment-name "Fraud_Detection_CI" \
           --env-manager local \
@@ -44,3 +43,60 @@ jobs:
         path: |
           mlruns/
           MLProject/model/
+        retention-days: 30
+
+  build-docker:
+    needs: train-model
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install mlflow scikit-learn pandas numpy
+        
+    - name: Train model and get run ID
+      id: train
+      run: |
+        cd MLProject
+        mlflow run . --env-manager local \
+          -P train_x=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_x.csv \
+          -P train_y=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_y.csv \
+          -P test_x=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_x.csv \
+          -P test_y=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_y.csv
+        
+        # Get the latest run ID
+        RUN_ID=$(ls -t ../mlruns/0 | head -1)
+        echo "RUN_ID=$RUN_ID" >> $GITHUB_OUTPUT
+        
+    - name: Build Docker image with MLflow
+      run: |
+        mlflow models build-docker \
+          -m "runs:/${{ steps.train.outputs.RUN_ID }}/model" \
+          -n "fraud-detection-model" \
+          --enable-mlserver
+        
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        
+    - name: Push Docker image
+      run: |
+        docker tag fraud-detection-model ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:latest
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:latest
+        
+    - name: Tag and push version
+      run: |
+        docker tag fraud-detection-model ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:${{ github.sha }}
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:${{ github.sha }}
