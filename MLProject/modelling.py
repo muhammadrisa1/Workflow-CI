@@ -8,14 +8,37 @@ from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, 
     f1_score, roc_auc_score, confusion_matrix
 )
+import requests
+import os
+from urllib.parse import urlparse
+
+def download_file(url, local_filename):
+    """Download file from URL if it's a web URL"""
+    parsed = urlparse(url)
+    if parsed.scheme in ('http', 'https'):
+        print(f"Downloading {url}...")
+        response = requests.get(url)
+        response.raise_for_status()
+        with open(local_filename, 'wb') as f:
+            f.write(response.content)
+        return local_filename
+    else:
+        # Local file path
+        return url
 
 def load_dataset(train_x, train_y, test_x, test_y):
     print("Loading datasets...")
 
-    X_train_final = pd.read_csv(train_x)
-    y_train_bal = pd.read_csv(train_y)
-    X_test_final = pd.read_csv(test_x)
-    y_test = pd.read_csv(test_y)
+    # Download files if they are URLs
+    local_train_x = download_file(train_x, "X_train_final.csv")
+    local_train_y = download_file(train_y, "y_train_bal.csv") 
+    local_test_x = download_file(test_x, "X_test_final.csv")
+    local_test_y = download_file(test_y, "y_test.csv")
+
+    X_train_final = pd.read_csv(local_train_x)
+    y_train_bal = pd.read_csv(local_train_y)
+    X_test_final = pd.read_csv(local_test_x)
+    y_test = pd.read_csv(local_test_y)
 
     # Jika dataframe memiliki 1 kolom, ubah ke Series
     if isinstance(y_train_bal, pd.DataFrame):
@@ -28,6 +51,16 @@ def load_dataset(train_x, train_y, test_x, test_y):
     print(f"X_test_final: {X_test_final.shape}")
     print(f"y_test: {y_test.shape}")
 
+    # Cleanup downloaded files
+    if local_train_x != train_x:
+        os.remove(local_train_x)
+    if local_train_y != train_y:
+        os.remove(local_train_y)
+    if local_test_x != test_x:
+        os.remove(local_test_x)
+    if local_test_y != test_y:
+        os.remove(local_test_y)
+
     return X_train_final, y_train_bal, X_test_final, y_test
 
 
@@ -37,10 +70,8 @@ def train_model(train_x, train_y, test_x, test_y, model_output):
         train_x, train_y, test_x, test_y
     )
 
-    mlflow.set_experiment("Fraud_Detection_IsolationForest")
-
-    with mlflow.start_run(run_name="IsolationForest_Final_Optimal"):
-        mlflow.autolog()
+    with mlflow.start_run(run_name="IsolationForest_Final_Optimal") as run:
+        print(f"MLflow Run ID: {run.info.run_id}")
 
         # Gunakan hanya data NORMAL untuk training
         normal_data = X_train_final[y_train_bal == 0]
