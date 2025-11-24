@@ -19,6 +19,7 @@ jobs:
 
     - name: Download datasets from Github Releases
       run: |
+        mkdir -p MLProject/data
         cd MLProject/data
         wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0/X_train_final.csv
         wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0/y_train_bal.csv
