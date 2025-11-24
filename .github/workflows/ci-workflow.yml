@@ -64,26 +64,32 @@ jobs:
         python -m pip install --upgrade pip
         pip install mlflow scikit-learn pandas numpy
         
-    - name: Train model and get run ID
-      id: train
-      run: |
-        cd MLProject
-        mlflow run . --env-manager local \
-          -P train_x=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_x.csv \
-          -P train_y=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_y.csv \
-          -P test_x=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_x.csv \
-          -P test_y=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_y.csv
+    - name: Download MLflow artifacts from previous job
+      uses: actions/download-artifact@v4
+      with:
+        name: mlflow-artifacts
+        path: ./
         
-        # Get the latest run ID
-        RUN_ID=$(ls -t ../mlruns/0 | head -1)
-        echo "RUN_ID=$RUN_ID" >> $GITHUB_OUTPUT
-        
-    - name: Build Docker image with MLflow
+    - name: Find latest run and build Docker
+      id: build
       run: |
-        mlflow models build-docker \
-          -m "runs:/${{ steps.train.outputs.RUN_ID }}/model" \
-          -n "fraud-detection-model" \
-          --enable-mlserver
+        # Cari run ID yang paling baru
+        RUN_ID=$(ls -t mlruns/0 | head -1)
+        echo "RUN_ID=$RUN_ID"
+        
+        if [ -d "mlruns/0/$RUN_ID/artifacts/model" ]; then
+          echo "Model found for run: $RUN_ID"
+          
+          mlflow models build-docker \
+            -m "mlruns/0/$RUN_ID/artifacts/model" \
+            -n "fraud-detection-model" \
+            --enable-mlserver
+            
+        else
+          echo "ERROR: Model not found for run: $RUN_ID"
+          ls -la mlruns/0/$RUN_ID/artifacts/
+          exit 1
+        fi
         
     - name: Log in to Docker Hub
       uses: docker/login-action@v3
