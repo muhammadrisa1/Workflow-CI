@@ -1,0 +1,105 @@
+name: Fraud Detection CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  schedule:
+    - cron: '0 0 * * 0'  # Run weekly on Sunday at midnight
+  workflow_dispatch:  # Manual trigger
+
+jobs:
+  train-model:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install mlflow scikit-learn pandas numpy boto3
+        
+    - name: Run MLflow project
+      run: |
+        cd MLProject
+        mlflow run . \
+          --experiment-name "Fraud_Detection_CI" \
+          --env-manager local
+          
+    - name: Upload MLflow artifacts
+      uses: actions/upload-artifact@v3
+      with:
+        name: mlflow-artifacts
+        path: |
+          mlruns/
+          MLProject/model/
+        retention-days: 30
+        
+    - name: Upload model to GitHub Releases
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: |
+          MLProject/model/**/*
+          mlruns/**/*
+          
+  build-docker:
+    needs: train-model
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.12'
+        
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install mlflow scikit-learn pandas numpy
+        
+    - name: Train model and get run ID
+      id: train
+      run: |
+        cd MLProject
+        mlflow run . --env-manager local
+        
+        # Get the latest run ID
+        RUN_ID=$(ls -t ../mlruns/0 | head -1)
+        echo "RUN_ID=$RUN_ID" >> $GITHUB_OUTPUT
+        
+    - name: Build Docker image with MLflow
+      run: |
+        cd MLProject
+        mlflow models build-docker \
+          -m "runs:/${{ steps.train.outputs.RUN_ID }}/model" \
+          -n "fraud-detection-model" \
+          --enable-mlserver
+        
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v2
+      with:
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+        
+    - name: Push Docker image
+      run: |
+        docker tag fraud-detection-model ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:latest
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:latest
+        
+    - name: Tag and push version
+      run: |
+        docker tag fraud-detection-model ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:${{ github.sha }}
+        docker push ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:${{ github.sha }}

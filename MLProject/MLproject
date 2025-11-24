@@ -1,0 +1,11 @@
+name: fraud-detection-isolation-forest
+conda_env: conda.yaml
+entry_points:
+  main:
+    parameters:
+      train_x: {type: str, default: "data/X_train_final.csv"}
+      train_y: {type: str, default: "data/y_train_bal.csv"}
+      test_x: {type: str, default: "data/X_test_final.csv"}
+      test_y: {type: str, default: "data/y_test.csv"}
+      model_output: {type: str, default: "model"}
+    command: "python modelling.py --train_x={train_x} --train_y={train_y} --test_x={test_x} --test_y={test_y} --model_output={model_output}"
