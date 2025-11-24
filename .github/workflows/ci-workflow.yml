@@ -19,18 +19,16 @@ jobs:
 
     - name: Download datasets from Github Releases
       run: |
-        mkdir -p MLProject/data
-        cd MLProject/data
-        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0/X_train_final.csv
-        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0/y_train_bal.csv
-        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0/X_test_final.csv
-        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0/y_test.csv
+        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_x.csv
+        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_y.csv
+        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_x.csv
+        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_y.csv
         ls -la
       
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
-        python-version: '3.8'  # Match dengan conda.yaml
+        python-version: '3.12' 
         
     - name: Install dependencies
       run: |
@@ -64,11 +62,11 @@ jobs:
       
     - name: Download datasets for Docker build
       run: |
-        cd MLProject/data
-        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0/X_train_final.csv
-        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0/y_train_bal.csv
-        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0/X_test_final.csv
-        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0/y_test.csv
+        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_x.csv
+        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_y.csv
+        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_x.csv
+        wget https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_y.csv
+        ls -la
       
     - name: Set up Python
       uses: actions/setup-python@v4
