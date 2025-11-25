@@ -3,9 +3,9 @@ conda_env: conda.yaml
 entry_points:
   main:
     parameters:
-      train_x: {type: str, default: "https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_x.csv"}
-      train_y: {type: str, default: "https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_y.csv"}
-      test_x: {type: str, default: "https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_x.csv"}
-      test_y: {type: str, default: "https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_y.csv"}
+      train_x: {type: str, default: "https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_x.csv"}
+      train_y: {type: str, default: "https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_y.csv"}
+      test_x: {type: str, default: "https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_x.csv"}
+      test_y: {type: str, default: "https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_y.csv"}
       model_output: {type: str, default: "model"}
     command: "python modelling.py --train_x={train_x} --train_y={train_y} --test_x={test_x} --test_y={test_y} --model_output={model_output}"
