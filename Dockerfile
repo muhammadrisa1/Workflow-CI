@@ -1,14 +1,12 @@
-FROM python:3.8-slim
+FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY MLProject/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Install dependencies
+RUN pip install mlflow scikit-learn pandas numpy
 
-COPY MLProject/ .
+# Install MLServer for serving
+RUN pip install mlserver mlserver-sklearn
 
-RUN pip install mlserver-sklearn
-
-RUN echo '@@servers: [{"name": "sklearn", "implementation": "mlserver_sklearn.SKLearnModel"}]' > model-settings.yml
-
-CMD ["python", "modelling.py"]
+# Default command
+CMD ["python", "-c", "print('MLflow model container ready')"]
