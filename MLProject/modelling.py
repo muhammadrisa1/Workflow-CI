@@ -16,11 +16,12 @@ def download_file(url, local_filename):
     """Download file from URL if it's a web URL"""
     parsed = urlparse(url)
     if parsed.scheme in ('http', 'https'):
-        print(f"Downloading {url}...")
+        print(f"Downloading {url} to {local_filename}...")
         response = requests.get(url)
         response.raise_for_status()
         with open(local_filename, 'wb') as f:
             f.write(response.content)
+        print(f"Download completed: {local_filename}")
         return local_filename
     else:
         # Local file path
@@ -29,40 +30,30 @@ def download_file(url, local_filename):
 def load_dataset(train_x, train_y, test_x, test_y):
     print("Loading datasets...")
 
-    # Download files if they are URLs
-    local_train_x = download_file(train_x, "X_train_final.csv")
-    local_train_y = download_file(train_y, "y_train_bal.csv") 
-    local_test_x = download_file(test_x, "X_test_final.csv")
-    local_test_y = download_file(test_y, "y_test.csv")
+    # Download files dengan nama yang sesuai dengan URL asli
+    local_train_x = download_file(train_x, "creditcard_train_x.csv")  # Sesuai nama di URL
+    local_train_y = download_file(train_y, "creditcard_train_y.csv")  # Sesuai nama di URL
+    local_test_x = download_file(test_x, "creditcard_test_x.csv")     # Sesuai nama di URL  
+    local_test_y = download_file(test_y, "creditcard_test_y.csv")     # Sesuai nama di URL
 
+    # Load datasets
     X_train_final = pd.read_csv(local_train_x)
     y_train_bal = pd.read_csv(local_train_y)
     X_test_final = pd.read_csv(local_test_x)
     y_test = pd.read_csv(local_test_y)
 
     # Jika dataframe memiliki 1 kolom, ubah ke Series
-    if isinstance(y_train_bal, pd.DataFrame):
+    if isinstance(y_train_bal, pd.DataFrame) and y_train_bal.shape[1] == 1:
         y_train_bal = y_train_bal.iloc[:, 0]
-    if isinstance(y_test, pd.DataFrame):
+    if isinstance(y_test, pd.DataFrame) and y_test.shape[1] == 1:
         y_test = y_test.iloc[:, 0]
 
-    print(f"X_train_final: {X_train_final.shape}")
-    print(f"y_train_bal: {y_train_bal.shape}")
-    print(f"X_test_final: {X_test_final.shape}")
-    print(f"y_test: {y_test.shape}")
-
-    # Cleanup downloaded files
-    if local_train_x != train_x:
-        os.remove(local_train_x)
-    if local_train_y != train_y:
-        os.remove(local_train_y)
-    if local_test_x != test_x:
-        os.remove(local_test_x)
-    if local_test_y != test_y:
-        os.remove(local_test_y)
+    print(f"X_train_final shape: {X_train_final.shape}")
+    print(f"y_train_bal shape: {y_train_bal.shape}")
+    print(f"X_test_final shape: {X_test_final.shape}")
+    print(f"y_test shape: {y_test.shape}")
 
     return X_train_final, y_train_bal, X_test_final, y_test
-
 
 def train_model(train_x, train_y, test_x, test_y, model_output):
     
@@ -70,10 +61,12 @@ def train_model(train_x, train_y, test_x, test_y, model_output):
         train_x, train_y, test_x, test_y
     )
 
+    # Pastikan MLflow tracking aktif
+    print("MLflow tracking URI:", mlflow.get_tracking_uri())
+    
     with mlflow.start_run(run_name="IsolationForest_Final_Optimal") as run:
         print(f"MLflow Run ID: {run.info.run_id}")
 
-        # Gunakan hanya data NORMAL untuk training
         normal_data = X_train_final[y_train_bal == 0]
         print(f"Normal data for training: {normal_data.shape}")
 
@@ -95,39 +88,63 @@ def train_model(train_x, train_y, test_x, test_y, model_output):
         precision = precision_score(y_test, y_pred_final)
         recall = recall_score(y_test, y_pred_final)
         f1 = f1_score(y_test, y_pred_final)
-        auc_score = roc_auc_score(y_test, -final_model.decision_function(X_test_final))
+        
+        # Decision function untuk ROC-AUC
+        decision_scores = final_model.decision_function(X_test_final)
+        auc_score = roc_auc_score(y_test, -decision_scores)  # Negate karena anomaly detection
+        
         cm = confusion_matrix(y_test, y_pred_final)
         tn, fp, fn, tp = cm.ravel()
 
-        # Log params
-        mlflow.log_param("contamination", 0.001)
-        mlflow.log_param("n_estimators", 200)
-        mlflow.log_param("random_state", 42)
-        mlflow.log_param("training_samples", len(normal_data))
+        # Log parameters
+        mlflow.log_params({
+            "contamination": 0.001,
+            "n_estimators": 200,
+            "random_state": 42,
+            "training_samples": len(normal_data),
+            "model_type": "IsolationForest"
+        })
 
         # Log metrics
-        mlflow.log_metric("accuracy", accuracy)
-        mlflow.log_metric("precision", precision)
-        mlflow.log_metric("recall", recall)
-        mlflow.log_metric("f1_score", f1)
-        mlflow.log_metric("roc_auc", auc_score)
-        mlflow.log_metric("true_positives", tp)
-        mlflow.log_metric("false_positives", fp)
-        mlflow.log_metric("true_negatives", tn)
-        mlflow.log_metric("false_negatives", fn)
+        mlflow.log_metrics({
+            "accuracy": accuracy,
+            "precision": precision,
+            "recall": recall,
+            "f1_score": f1,
+            "roc_auc": auc_score,
+            "true_positives": tp,
+            "false_positives": fp,
+            "true_negatives": tn,
+            "false_negatives": fn
+        })
 
         false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0
         mlflow.log_metric("false_positive_rate", false_positive_rate)
 
-        # Tags
-        mlflow.set_tag("status", "production_ready")
-        mlflow.set_tag("tuning_result", "optimal")
-        mlflow.set_tag("model_type", "IsolationForest")
-        mlflow.set_tag("project", "fraud_detection")
-        mlflow.set_tag("data_source", "processed_creditcard")
+        # Set tags
+        mlflow.set_tags({
+            "status": "production_ready",
+            "tuning_result": "optimal", 
+            "model_type": "IsolationForest",
+            "project": "fraud_detection",
+            "data_source": "processed_creditcard"
+        })
 
-        # Save model
-        mlflow.sklearn.save_model(final_model, model_output)
+        # PERBAIKAN KRITIS: Gunakan log_model bukan save_model
+        print("Logging model to MLflow...")
+        mlflow.sklearn.log_model(
+            sk_model=final_model,
+            artifact_path="model",  # Path dalam run MLflow
+            registered_model_name="fraud-detection-isolation-forest"
+        )
+        
+        # Juga save model lokal untuk backup
+        import pickle
+        os.makedirs(model_output, exist_ok=True)
+        with open(os.path.join(model_output, "model.pkl"), "wb") as f:
+            pickle.dump(final_model, f)
+        
+        print(f"Model saved to {model_output}/model.pkl")
 
         print("\nFINAL MODEL RESULTS")
         print(f"\nCONFUSION MATRIX:")
@@ -144,7 +161,7 @@ def train_model(train_x, train_y, test_x, test_y, model_output):
         print(f"ROC-AUC:   {auc_score:.4f}")
 
         print("\nModelling completed successfully!")
-
+        print(f"MLflow Run: {run.info.run_id}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
