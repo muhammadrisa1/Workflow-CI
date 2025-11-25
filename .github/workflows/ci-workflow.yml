@@ -25,10 +25,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install mlflow scikit-learn pandas numpy boto3 requests
         
-    - name: Run MLflow project
+    - name: Create mlruns directory
+      run: mkdir -p mlruns
+      
+    - name: Run MLflow project from correct directory
       run: |
-        cd MLProject
-        mlflow run . \
+        # Pastikan kita berada di directory yang benar
+        MLFLOW_TRACKING_URI=file://$(pwd)/mlruns mlflow run MLProject/ \
           --experiment-name "Fraud_Detection_CI" \
           --env-manager local \
           -P train_x=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_x.csv \
@@ -36,13 +39,18 @@ jobs:
           -P test_x=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_x.csv \
           -P test_y=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_test_y.csv
           
+    - name: Verify MLflow artifacts
+      run: |
+        echo "=== Checking mlruns directory ==="
+        ls -la mlruns/
+        echo "=== Checking for model files ==="
+        find mlruns -name "*.pkl" -o -name "MLmodel" | head -10 || echo "No model files found yet"
+        
     - name: Upload MLflow artifacts
       uses: actions/upload-artifact@v4
       with:
         name: mlflow-artifacts
-        path: |
-          mlruns/
-          MLProject/model/
+        path: mlruns/
         retention-days: 30
 
   build-docker:
@@ -58,7 +66,7 @@ jobs:
       uses: actions/download-artifact@v4
       with:
         name: mlflow-artifacts
-        path: ./
+        path: mlruns/
         
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -70,49 +78,59 @@ jobs:
         python -m pip install --upgrade pip
         pip install mlflow scikit-learn pandas numpy
         
-    - name: Debug - List all files
+    - name: Debug - Check downloaded artifacts
       run: |
-        echo "=== Current directory ==="
+        echo "=== Current directory structure ==="
         pwd
         ls -la
-        echo "=== mlruns directory ==="
-        find . -name "mlruns" -type d
-        echo "=== mlruns content ==="  
-        find mlruns -type f -name "*.pkl" -o -name "MLmodel" | head -10
+        echo "=== mlruns content ==="
+        find mlruns -type f | head -20 || echo "No files in mlruns"
         
-    - name: Find model path and build Docker
-      id: build
+    - name: Find and build model
+      id: build-model
       run: |
-        # Cari file model
-        MODEL_PATH=$(find mlruns -name "MLmodel" -path "*/artifacts/model/*" | head -1 | xargs dirname)
+        # Cari model dengan pattern yang lebih spesifik
+        echo "=== Searching for model files ==="
+        find . -name "MLmodel" -type f | head -10
+        
+        MODEL_PATH=$(find mlruns -name "MLmodel" -type f | grep "artifacts/model" | head -1)
+        if [ -z "$MODEL_PATH" ]; then
+          # Coba pattern alternatif
+          MODEL_PATH=$(find mlruns -name "MLmodel" -type f | head -1)
+        fi
+        
         if [ -n "$MODEL_PATH" ]; then
-          echo "Found model at: $MODEL_PATH"
-          echo "MODEL_PATH=$MODEL_PATH" >> $GITHUB_OUTPUT
+          MODEL_DIR=$(dirname "$MODEL_PATH")
+          echo "Found model at: $MODEL_DIR"
+          echo "MODEL_PATH=$MODEL_DIR" >> $GITHUB_OUTPUT
           
-          # Build dengan MLflow
+          # Build Docker image
           mlflow models build-docker \
-            -m "$MODEL_PATH" \
+            -m "$MODEL_DIR" \
             -n "fraud-detection-model" \
             --enable-mlserver
         else
-          echo "ERROR: Model not found!"
-          echo "Trying alternative search..."
-          find mlruns -type f | head -20
+          echo "ERROR: Model file not found!"
+          echo "=== Full search ==="
+          find mlruns -type f | head -30
           exit 1
         fi
         
     - name: Log in to Docker Hub
+      if: steps.build-model.outcome == 'success'
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKERHUB_USERNAME }}
         password: ${{ secrets.DOCKERHUB_TOKEN }}
         
     - name: Push Docker image
+      if: steps.build-model.outcome == 'success'
       run: |
         docker tag fraud-detection-model ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:latest
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:latest
         
     - name: Tag and push version
+      if: steps.build-model.outcome == 'success'
       run: |
         docker tag fraud-detection-model ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:${{ github.sha }}
         docker push ${{ secrets.DOCKERHUB_USERNAME }}/fraud-detection-model:${{ github.sha }}
