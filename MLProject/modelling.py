@@ -24,25 +24,25 @@ def download_file(url, local_filename):
         print(f"Download completed: {local_filename}")
         return local_filename
     else:
-        # Local file path
+        
         return url
 
 def load_dataset(train_x, train_y, test_x, test_y):
     print("Loading datasets...")
 
     # Download files dengan nama yang sesuai dengan URL asli
-    local_train_x = download_file(train_x, "creditcard_train_x.csv")  # Sesuai nama di URL
-    local_train_y = download_file(train_y, "creditcard_train_y.csv")  # Sesuai nama di URL
-    local_test_x = download_file(test_x, "creditcard_test_x.csv")     # Sesuai nama di URL  
-    local_test_y = download_file(test_y, "creditcard_test_y.csv")     # Sesuai nama di URL
+    local_train_x = download_file(train_x, "creditcard_train_x.csv")
+    local_train_y = download_file(train_y, "creditcard_train_y.csv") 
+    local_test_x = download_file(test_x, "creditcard_test_x.csv")     
+    local_test_y = download_file(test_y, "creditcard_test_y.csv")     
 
-    # Load datasets
+    
     X_train_final = pd.read_csv(local_train_x)
     y_train_bal = pd.read_csv(local_train_y)
     X_test_final = pd.read_csv(local_test_x)
     y_test = pd.read_csv(local_test_y)
 
-    # Jika dataframe memiliki 1 kolom, ubah ke Series
+    
     if isinstance(y_train_bal, pd.DataFrame) and y_train_bal.shape[1] == 1:
         y_train_bal = y_train_bal.iloc[:, 0]
     if isinstance(y_test, pd.DataFrame) and y_test.shape[1] == 1:
@@ -61,7 +61,7 @@ def train_model(train_x, train_y, test_x, test_y, model_output):
         train_x, train_y, test_x, test_y
     )
 
-    # Pastikan MLflow tracking aktif
+   
     print("MLflow tracking URI:", mlflow.get_tracking_uri())
     
     with mlflow.start_run(run_name="IsolationForest_Final_Optimal") as run:
@@ -83,20 +83,20 @@ def train_model(train_x, train_y, test_x, test_y, model_output):
         final_predictions = final_model.predict(X_test_final)
         y_pred_final = np.where(final_predictions == -1, 1, 0)
 
-        # Compute metrics
+       
         accuracy = accuracy_score(y_test, y_pred_final)
         precision = precision_score(y_test, y_pred_final)
         recall = recall_score(y_test, y_pred_final)
         f1 = f1_score(y_test, y_pred_final)
         
-        # Decision function untuk ROC-AUC
+        
         decision_scores = final_model.decision_function(X_test_final)
-        auc_score = roc_auc_score(y_test, -decision_scores)  # Negate karena anomaly detection
+        auc_score = roc_auc_score(y_test, -decision_scores) 
         
         cm = confusion_matrix(y_test, y_pred_final)
         tn, fp, fn, tp = cm.ravel()
 
-        # Log parameters
+        
         mlflow.log_params({
             "contamination": 0.001,
             "n_estimators": 200,
@@ -105,7 +105,7 @@ def train_model(train_x, train_y, test_x, test_y, model_output):
             "model_type": "IsolationForest"
         })
 
-        # Log metrics
+       
         mlflow.log_metrics({
             "accuracy": accuracy,
             "precision": precision,
@@ -121,7 +121,7 @@ def train_model(train_x, train_y, test_x, test_y, model_output):
         false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0
         mlflow.log_metric("false_positive_rate", false_positive_rate)
 
-        # Set tags
+        
         mlflow.set_tags({
             "status": "production_ready",
             "tuning_result": "optimal", 
@@ -130,7 +130,7 @@ def train_model(train_x, train_y, test_x, test_y, model_output):
             "data_source": "processed_creditcard"
         })
 
-        # PERBAIKAN KRITIS: Gunakan log_model bukan save_model
+        
         print("Logging model to MLflow...")
         mlflow.sklearn.log_model(
             sk_model=final_model,
@@ -138,7 +138,7 @@ def train_model(train_x, train_y, test_x, test_y, model_output):
             registered_model_name="fraud-detection-isolation-forest"
         )
         
-        # Juga save model lokal untuk backup
+       
         import pickle
         os.makedirs(model_output, exist_ok=True)
         with open(os.path.join(model_output, "model.pkl"), "wb") as f:
