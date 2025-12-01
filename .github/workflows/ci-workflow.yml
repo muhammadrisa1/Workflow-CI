@@ -24,7 +24,8 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install mlflow scikit-learn pandas numpy boto3 requests tensorflow==2.15.0
+        pip install mlflow scikit-learn pandas numpy boto3 requests tensorflow==2.15.0 lightgbm
+
         
     - name: Create mlruns directory
       run: mkdir -p mlruns
