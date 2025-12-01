@@ -31,8 +31,8 @@ jobs:
       
     - name: Run MLflow project
       run: |
-        MLFLOW_TRACKING_URI=file://$(pwd)/mlruns \
-        mlflow run . \
+        export MLFLOW_TRACKING_URI=file://$(pwd)/mlruns
+        mlflow run MLProject \
           --experiment-name "Fraud_Detection_CI" \
           --env-manager local \
           -P train_final=https://github.com/muhammadrisa1/Workflow-CI/releases/download/v1.0.0/creditcard_train_processed.csv \
