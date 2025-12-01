@@ -1,183 +1,149 @@
-import pandas as pd
+import os
+import random
 import numpy as np
-import argparse
+import pandas as pd
+
+# MLflow
 import mlflow
 import mlflow.sklearn
-from sklearn.ensemble import IsolationForest
-from sklearn.metrics import (
-    accuracy_score, precision_score, recall_score, 
-    f1_score, roc_auc_score, confusion_matrix
-)
-import requests
-import os
-from urllib.parse import urlparse
+import mlflow.tensorflow
 
-def download_file(url, local_filename):
-    """Download file from URL if it's a web URL"""
-    parsed = urlparse(url)
-    if parsed.scheme in ('http', 'https'):
-        print(f"Downloading {url} to {local_filename}...")
-        response = requests.get(url)
-        response.raise_for_status()
-        with open(local_filename, 'wb') as f:
-            f.write(response.content)
-        print(f"Download completed: {local_filename}")
-        return local_filename
-    else:
-        
-        return url
+# Scikit-learn
+from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, roc_auc_score, confusion_matrix
 
-def load_dataset(train_x, train_y, test_x, test_y):
-    print("Loading datasets...")
+# LightGBM
+from lightgbm import LGBMClassifier
 
-    # Download files dengan nama yang sesuai dengan URL asli
-    local_train_x = download_file(train_x, "creditcard_train_x.csv")
-    local_train_y = download_file(train_y, "creditcard_train_y.csv") 
-    local_test_x = download_file(test_x, "creditcard_test_x.csv")     
-    local_test_y = download_file(test_y, "creditcard_test_y.csv")     
+# TensorFlow / Keras for autoencoder
+import tensorflow as tf
+from tensorflow import keras
+from tensorflow.keras import layers
 
-    
-    X_train_final = pd.read_csv(local_train_x)
-    y_train_bal = pd.read_csv(local_train_y)
-    X_test_final = pd.read_csv(local_test_x)
-    y_test = pd.read_csv(local_test_y)
+# reproducibility
+SEED = 42
+random.seed(SEED)
+np.random.seed(SEED)
+tf.random.set_seed(SEED)
+os.environ["PYTHONHASHSEED"] = str(SEED)
 
-    
-    if isinstance(y_train_bal, pd.DataFrame) and y_train_bal.shape[1] == 1:
-        y_train_bal = y_train_bal.iloc[:, 0]
-    if isinstance(y_test, pd.DataFrame) and y_test.shape[1] == 1:
-        y_test = y_test.iloc[:, 0]
+print("\nLoad Dataset")
 
-    print(f"X_train_final shape: {X_train_final.shape}")
-    print(f"y_train_bal shape: {y_train_bal.shape}")
-    print(f"X_test_final shape: {X_test_final.shape}")
-    print(f"y_test shape: {y_test.shape}")
+train_final = pd.read_csv('../../creditcard_train_processed.csv')
+test_final = pd.read_csv('../../creditcard_test_processed.csv')
 
-    return X_train_final, y_train_bal, X_test_final, y_test
+print("Dataset Loaded.")
+print(f"Train shape : {train_final.shape}")
+print(f"Test shape  : {test_final.shape}")
 
-def train_model(train_x, train_y, test_x, test_y, model_output):
-    
-    X_train_final, y_train_bal, X_test_final, y_test = load_dataset(
-        train_x, train_y, test_x, test_y
+X_train = train_final.drop(columns=["Class"])
+y_train = train_final["Class"]
+
+X_test = test_final.drop(columns=["Class"])
+y_test = test_final["Class"]
+
+print("\nFitur dan label dipisahkan.")
+print(f"X_train: {X_train.shape}, y_train: {y_train.shape}")
+print(f"X_test : {X_test.shape},  y_test : {y_test.shape}")
+
+normal_data = X_train[y_train == 0]
+print(f"\nNormal data for training (autoencoder): {normal_data.shape}")
+
+scaler = StandardScaler()
+scaler.fit(X_train)  
+
+X_train_scaled = scaler.transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+normal_scaled = scaler.transform(normal_data)
+
+n_features = X_train.shape[1]
+encoding_dim = max(8, n_features // 4)  
+
+def build_autoencoder(input_dim, encoding_dim):
+    input_layer = keras.Input(shape=(input_dim,))
+    x = layers.Dense(max(encoding_dim * 4, 64), activation="relu")(input_layer)
+    x = layers.Dense(encoding_dim * 2, activation="relu")(x)
+    encoded = layers.Dense(encoding_dim, activation="relu", name="bottleneck")(x)
+    x = layers.Dense(encoding_dim * 2, activation="relu")(encoded)
+    x = layers.Dense(max(encoding_dim * 4, 64), activation="relu")(x)
+    decoded = layers.Dense(input_dim, activation="linear")(x)
+    autoencoder = keras.Model(inputs=input_layer, outputs=decoded, name="autoencoder")
+    return autoencoder
+
+mlflow.set_experiment("Fraud_Detection_LGBM_with_AE")
+
+with mlflow.start_run(run_name="LGBM_with_AE"):
+    mlflow.autolog()            
+    mlflow.tensorflow.autolog()
+
+    autoencoder = build_autoencoder(input_dim=n_features, encoding_dim=encoding_dim)
+    autoencoder.compile(optimizer=keras.optimizers.Adam(learning_rate=1e-3), loss="mse")
+
+    print("\nTraining autoencoder on normal data")
+    early = keras.callbacks.EarlyStopping(monitor="val_loss", patience=5, restore_best_weights=True)
+    history = autoencoder.fit(
+        normal_scaled,
+        normal_scaled,
+        epochs=100,
+        batch_size=256,
+        shuffle=True,
+        validation_split=0.1,
+        callbacks=[early],
+        verbose=1
     )
 
-   
-    print("MLflow tracking URI:", mlflow.get_tracking_uri())
-    
-    with mlflow.start_run(run_name="IsolationForest_Final_Optimal") as run:
-        print(f"MLflow Run ID: {run.info.run_id}")
+    print("\nComputing reconstruction errors (autoencoder)...")
+    recon_train = autoencoder.predict(X_train_scaled)
+    recon_train_err = np.mean(np.square(recon_train - X_train_scaled), axis=1)
 
-        normal_data = X_train_final[y_train_bal == 0]
-        print(f"Normal data for training: {normal_data.shape}")
+    recon_test = autoencoder.predict(X_test_scaled)
+    recon_test_err = np.mean(np.square(recon_test - X_test_scaled), axis=1)
 
-        final_model = IsolationForest(
-            contamination=0.001,
-            n_estimators=200,
-            random_state=42
-        )
+    X_train_enh = np.hstack([X_train_scaled, recon_train_err.reshape(-1, 1)])
+    X_test_enh = np.hstack([X_test_scaled, recon_test_err.reshape(-1, 1)])
 
-        print("Training Isolation Forest model...")
-        final_model.fit(normal_data)
+    feature_names = list(X_train.columns) + ["recon_error"]
+    X_train_enh_df = pd.DataFrame(X_train_enh, columns=feature_names)
+    X_test_enh_df = pd.DataFrame(X_test_enh, columns=feature_names)
 
-        print("Making predictions...")
-        final_predictions = final_model.predict(X_test_final)
-        y_pred_final = np.where(final_predictions == -1, 1, 0)
+    print(f"Enhanced X_train shape: {X_train_enh_df.shape}")
+    print(f"Enhanced X_test  shape: {X_test_enh_df.shape}")
 
-       
-        accuracy = accuracy_score(y_test, y_pred_final)
-        precision = precision_score(y_test, y_pred_final)
-        recall = recall_score(y_test, y_pred_final)
-        f1 = f1_score(y_test, y_pred_final)
-        
-        
-        decision_scores = final_model.decision_function(X_test_final)
-        auc_score = roc_auc_score(y_test, -decision_scores) 
-        
-        cm = confusion_matrix(y_test, y_pred_final)
-        tn, fp, fn, tp = cm.ravel()
+    print("\nTraining LightGBM classifier on enhanced features")
 
-        
-        mlflow.log_params({
-            "contamination": 0.001,
-            "n_estimators": 200,
-            "random_state": 42,
-            "training_samples": len(normal_data),
-            "model_type": "IsolationForest"
-        })
+    n_pos = sum(y_train == 1)
+    n_neg = sum(y_train == 0)
+    scale_pos_weight = (n_neg / n_pos) if n_pos > 0 else 1.0
 
-       
-        mlflow.log_metrics({
-            "accuracy": accuracy,
-            "precision": precision,
-            "recall": recall,
-            "f1_score": f1,
-            "roc_auc": auc_score,
-            "true_positives": tp,
-            "false_positives": fp,
-            "true_negatives": tn,
-            "false_negatives": fn
-        })
-
-        false_positive_rate = fp / (fp + tn) if (fp + tn) > 0 else 0
-        mlflow.log_metric("false_positive_rate", false_positive_rate)
-
-        
-        mlflow.set_tags({
-            "status": "production_ready",
-            "tuning_result": "optimal", 
-            "model_type": "IsolationForest",
-            "project": "fraud_detection",
-            "data_source": "processed_creditcard"
-        })
-
-        
-        print("Logging model to MLflow...")
-        mlflow.sklearn.log_model(
-            sk_model=final_model,
-            artifact_path="model",  # Path dalam run MLflow
-            registered_model_name="fraud-detection-isolation-forest"
-        )
-        
-       
-        import pickle
-        os.makedirs(model_output, exist_ok=True)
-        with open(os.path.join(model_output, "model.pkl"), "wb") as f:
-            pickle.dump(final_model, f)
-        
-        print(f"Model saved to {model_output}/model.pkl")
-
-        print("\nFINAL MODEL RESULTS")
-        print(f"\nCONFUSION MATRIX:")
-        print(f"                Predicted")
-        print(f"               Normal   Fraud")
-        print(f"Actual Normal   {tn:6}   {fp:6}")
-        print(f"Actual Fraud    {fn:6}   {tp:6}")
-
-        print(f"\nPERFORMANCE METRICS:")
-        print(f"Accuracy:  {accuracy:.4f}")
-        print(f"Precision: {precision:.4f}")
-        print(f"Recall:    {recall:.4f}")
-        print(f"F1-Score:  {f1:.4f}")
-        print(f"ROC-AUC:   {auc_score:.4f}")
-
-        print("\nModelling completed successfully!")
-        print(f"MLflow Run: {run.info.run_id}")
-
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-
-    parser.add_argument("--train_x", type=str, required=True)
-    parser.add_argument("--train_y", type=str, required=True)
-    parser.add_argument("--test_x", type=str, required=True)
-    parser.add_argument("--test_y", type=str, required=True)
-    parser.add_argument("--model_output", type=str, default="model")
-
-    args = parser.parse_args()
-
-    train_model(
-        args.train_x,
-        args.train_y,
-        args.test_x,
-        args.test_y,
-        args.model_output
+    clf = LGBMClassifier(
+        n_estimators=500,
+        learning_rate=0.05,
+        max_depth=-1,
+        random_state=SEED,
+        n_jobs=-1,
+        scale_pos_weight=scale_pos_weight
     )
+
+    clf.fit(X_train_enh_df, y_train)
+
+    print("Predicting on test set")
+    y_pred = clf.predict(X_test_enh_df)
+    y_proba = clf.predict_proba(X_test_enh_df)[:, 1]
+
+    accuracy = accuracy_score(y_test, y_pred)
+    precision = precision_score(y_test, y_pred, zero_division=0)
+    recall = recall_score(y_test, y_pred, zero_division=0)
+    f1 = f1_score(y_test, y_pred, zero_division=0)
+    roc_auc = roc_auc_score(y_test, y_proba)
+    cm = confusion_matrix(y_test, y_pred)
+
+    print("\nFINAL EVALUATION")
+    print(f"Accuracy : {accuracy:.4f}")
+    print(f"Precision: {precision:.4f}")
+    print(f"Recall   : {recall:.4f}")
+    print(f"F1-Score : {f1:.4f}")
+    print(f"ROC-AUC  : {roc_auc:.4f}")
+    print("Confusion Matrix:")
+    print(cm)
+
+print("\nModelling with LightGBM + Autoencoder completed. MLflow autolog should have tracked the run.")
