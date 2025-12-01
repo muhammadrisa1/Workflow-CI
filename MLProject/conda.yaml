@@ -13,3 +13,4 @@ dependencies:
       - tensorflow==2.15.0
       - boto3
       - requests
+      - lightgbm
